@@ -19,7 +19,8 @@ desactivar TLS ni añadir bibliotecas al motor Ruby antiguo.
 - Variable `PYTHON_VERSION`: `3.12.10`.
 - Variable privada `PZ_ROOMS_JSON`: contenido del archivo local `data/rooms.json`.
 
-El servidor se niega a arrancar si faltan las claves; no genera otras al reiniciar.
+Sin claves, el servicio arranca en modo de preparación: `/health` devuelve
+`setup_required` y `/relay` rechaza conexiones con HTTP 503. No genera claves al reiniciar.
 No publicar las claves en Git ni incluirlas en capturas. `render.yaml` es una
 plantilla alternativa; el despliegue previsto usa creación directa del servicio.
 

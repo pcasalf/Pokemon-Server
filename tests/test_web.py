@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bridge import LocalBridge, validate_url
 from web_server import WebRelay
 from websockets.asyncio.client import connect
+from websockets.exceptions import InvalidStatus
 
 
 class WebTests(unittest.IsolatedAsyncioTestCase):
@@ -54,6 +55,22 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         response = await asyncio.wait_for(r.read(), 3)
         self.assertIn(b'200 OK', response)
         self.assertTrue(response.endswith(b'ok\n'))
+
+    async def test_service_without_keys_rejects_game_connections(self):
+        empty = WebRelay({}, Path(self.tmp.name) / 'empty-audit.jsonl')
+        port = await empty.start('127.0.0.1', 0)
+        try:
+            r, w = await asyncio.open_connection('127.0.0.1', port)
+            self.clients.append(w)
+            w.write(b'GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n')
+            await w.drain()
+            self.assertTrue((await asyncio.wait_for(r.read(), 3)).endswith(b'setup_required\n'))
+            with self.assertRaises(InvalidStatus) as caught:
+                async with connect(f'ws://127.0.0.1:{port}/relay'):
+                    self.fail('No debe aceptar conexiones de juego sin claves')
+            self.assertEqual(caught.exception.response.status_code, 503)
+        finally:
+            await empty.close()
 
     async def test_bridge_binary_roundtrip(self):
         a, b = await self.pair()

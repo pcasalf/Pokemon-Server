@@ -21,9 +21,11 @@ class WebRelay:
 
     async def request(self, connection, request):
         if request.path == '/health':
-            return connection.respond(HTTPStatus.OK, 'ok\n')
+            return connection.respond(HTTPStatus.OK, 'ok\n' if self.relay.rooms else 'setup_required\n')
         if request.path != '/relay':
             return connection.respond(HTTPStatus.NOT_FOUND, 'Not found\n')
+        if not self.relay.rooms:
+            return connection.respond(HTTPStatus.SERVICE_UNAVAILABLE, 'Setup required\n')
         if self.active >= self.relay.max_clients:
             return connection.respond(HTTPStatus.SERVICE_UNAVAILABLE, 'Busy\n')
         return None
@@ -63,12 +65,14 @@ class WebRelay:
 
 async def main():
     raw = os.environ.get('PZ_ROOMS_JSON')
-    if not raw:
-        raise SystemExit('Falta PZ_ROOMS_JSON: configura las claves como variable privada de Render.')
-    try:
-        rooms = validate_rooms(json.loads(raw))
-    except (ValueError, TypeError):
-        raise SystemExit('PZ_ROOMS_JSON no tiene un formato de salas valido.') from None
+    rooms = {}
+    if raw:
+        try:
+            rooms = validate_rooms(json.loads(raw))
+        except (ValueError, TypeError):
+            raise SystemExit('PZ_ROOMS_JSON no tiene un formato de salas valido.') from None
+    else:
+        print('Pendiente configurar PZ_ROOMS_JSON: conexiones de juego deshabilitadas.', flush=True)
     relay = WebRelay(rooms, os.environ.get('PZ_AUDIT_PATH', 'data/audit.jsonl'))
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
