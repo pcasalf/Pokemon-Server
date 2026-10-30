@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: pokemon-z-torneo
+    runtime: python
+    plan: free
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: python web_server.py
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: PZ_ROOMS_JSON
+        sync: false
