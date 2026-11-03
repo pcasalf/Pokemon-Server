@@ -1,5 +1,6 @@
 import http.client
 import json
+import socket
 import sys
 import tempfile
 import threading
@@ -8,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from anticheat import AntiCheat, ValidationError, STATS
-from anticheat_service import AuditHTTPServer
+from anticheat_service import AuditHTTPServer, AuditHandler
 
 ROOM = "PRUEBA01"
 ADMIN = "A" * 48
@@ -52,6 +53,24 @@ class AntiCheatTests(unittest.TestCase):
         self.assertEqual(self.store.observe(ROOM, "player", [pokemon(uid="fake")])["alerts"][0]["code"], "UNKNOWN_POKEMON")
         self.store.observe(ROOM, "player", [pokemon(level=40)])
         self.assertEqual(self.store.observe(ROOM, "player", [pokemon(level=29)])["alerts"][0]["code"], "LEVEL_REGRESSION")
+
+    def test_evolution_must_be_approved_and_audited(self):
+        self.store.enroll(ROOM, "player", pokemon(species="Bulbasaur"))
+        first = self.store.observe(ROOM, "player", [pokemon(species="Ivysaur")])
+        self.assertEqual(first["alerts"][0]["code"], "UNVERIFIED_EVOLUTION")
+        self.store.authorize_evolution(ROOM, "p001", "Ivysaur")
+        self.assertEqual(self.store.observe(ROOM, "player", [pokemon(species="Ivysaur")])["alerts"], [])
+        self.assertEqual(self.store.db.execute("SELECT COUNT(*) FROM evolutions").fetchone()[0], 1)
+        with self.assertRaises(ValidationError):
+            self.store.authorize_evolution(ROOM, "p001", "Ivysaur")
+        self.store.observe(ROOM, "player", [pokemon(species="Ivysaur", dead=True)])
+        with self.assertRaises(ValidationError):
+            self.store.authorize_evolution(ROOM, "p001", "Venusaur")
+
+    def test_evolution_can_approve_ability_change(self):
+        self.store.enroll(ROOM, "player", pokemon(species="Bulbasaur", ability="Overgrow"))
+        self.store.authorize_evolution(ROOM, "p001", "Ivysaur", ability="Chlorophyll")
+        self.assertEqual(self.store.observe(ROOM, "player", [pokemon(species="Ivysaur", ability="Chlorophyll")])["alerts"], [])
 
     def test_revival_requires_unique_gym_credit(self):
         self.store.enroll(ROOM, "player", pokemon())
@@ -128,6 +147,32 @@ class HTTPTests(unittest.TestCase):
         status, raw = self.request("GET", "/anticheat/alerts?room=PRUEBA01", token=ADMIN)
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(raw)["alerts"][0]["code"], "IMMUTABLE_CHANGED")
+
+    def test_admin_evolution_endpoint_and_unknown_room(self):
+        data = {"room": ROOM, "role": "player", "pokemon": pokemon(species="Bulbasaur")}
+        self.assertEqual(self.request("POST", "/anticheat/enroll", data, ADMIN)[0], 201)
+        evolution = {"room": ROOM, "uid": "p001", "species": "Ivysaur"}
+        self.assertEqual(self.request("POST", "/anticheat/evolution", evolution, PLAYER)[0], 401)
+        self.assertEqual(self.request("POST", "/anticheat/evolution", evolution, ADMIN)[0], 200)
+        self.assertEqual(self.request("POST", "/anticheat/observe",
+                                      dict(data, pokemon=[pokemon(species="Ivysaur")]), PLAYER)[0], 200)
+        self.assertEqual(self.store.get_alerts(), [])
+        self.assertEqual(self.request("POST", "/anticheat/enroll",
+                                      dict(data, room="FALSA000"), ADMIN)[0], 400)
+
+    def test_incomplete_request_expires(self):
+        old_timeout = AuditHandler.READ_TIMEOUT
+        AuditHandler.READ_TIMEOUT = 0.2
+        try:
+            with socket.create_connection(("127.0.0.1", self.http.server_port), timeout=2) as client:
+                client.settimeout(2)
+                client.sendall(b"POST /anticheat/observe HTTP/1.1\r\n"
+                               b"Host: localhost\r\nContent-Length: 60\r\n\r\n{}")
+                response = client.recv(2048)
+                self.assertIn(b"408", response)
+            self.assertEqual(self.request("GET", "/anticheat/alerts", token=ADMIN)[0], 200)
+        finally:
+            AuditHandler.READ_TIMEOUT = old_timeout
 
     def test_admin_revive_and_gym_endpoints(self):
         data = {"room": ROOM, "role": "player", "pokemon": pokemon()}
