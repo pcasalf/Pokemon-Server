@@ -47,7 +47,7 @@ def dispatch_anticheat(connection, request, rooms, store, admin_token):
             limit = int(args.get("limit", ["100"])[0])
             return _reply(connection, HTTPStatus.OK, {"alerts": store.get_alerts(room, limit)})
 
-        if path not in ("/anticheat/enroll", "/anticheat/observe", "/anticheat/gym", "/anticheat/revive"):
+        if path not in ("/anticheat/enroll", "/anticheat/observe", "/anticheat/gym", "/anticheat/revive", "/anticheat/evolution"):
             return _reply(connection, HTTPStatus.NOT_FOUND, {"error": "No existe"})
         if request.method != "POST":
             return _reply(connection, HTTPStatus.METHOD_NOT_ALLOWED, {"error": "Metodo no permitido"})
@@ -56,9 +56,18 @@ def dispatch_anticheat(connection, request, rooms, store, admin_token):
         payload = json.loads(request.body)
         if not isinstance(payload, dict):
             raise ValidationError("Objeto JSON obligatorio")
-        if path in ("/anticheat/enroll", "/anticheat/gym", "/anticheat/revive"):
+        if path in ("/anticheat/enroll", "/anticheat/gym", "/anticheat/revive", "/anticheat/evolution"):
             if not _authorized(request, admin_token):
                 return _reply(connection, HTTPStatus.UNAUTHORIZED, {"error": "No autorizado"})
+            if not isinstance(payload.get("room"), str) or payload["room"] not in rooms:
+                raise ValidationError("Sala inexistente")
+            if path == "/anticheat/evolution":
+                if set(payload) not in ({"room", "uid", "species"},
+                                        {"room", "uid", "species", "ability"}):
+                    raise ValidationError("Campos incorrectos")
+                return _reply(connection, HTTPStatus.OK,
+                              store.authorize_evolution(payload["room"], payload["uid"],
+                                                        payload["species"], payload.get("ability")))
             if path == "/anticheat/gym":
                 if set(payload) != {"room", "gym_id"}:
                     raise ValidationError("Campos incorrectos")
