@@ -100,6 +100,13 @@ class AntiCheat:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     room TEXT NOT NULL, uid TEXT NOT NULL, created REAL NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS evolutions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room TEXT NOT NULL, uid TEXT NOT NULL,
+                    old_species TEXT NOT NULL, new_species TEXT NOT NULL,
+                    old_ability TEXT NOT NULL, new_ability TEXT NOT NULL,
+                    created REAL NOT NULL
+                );
             """)
 
     def close(self):
@@ -144,7 +151,12 @@ class AntiCheat:
                 base = json.loads(raw)
                 if owner != role:
                     flags.append((p["uid"], "WRONG_OWNER", f"Inscrito para {owner}"))
-                for key in ("species", "ability", "nature", "ivs"):
+                # Evolucion es una mecanica normal. Sin evento autorizado se
+                # registra para revision, no como prueba de manipulacion.
+                if p["species"] != base["species"]:
+                    flags.append((p["uid"], "UNVERIFIED_EVOLUTION",
+                                  f"Especie {base['species']} -> {p['species']}; revisar evolucion"))
+                for key in ("ability", "nature", "ivs"):
                     if p[key] != base[key]:
                         flags.append((p["uid"], "IMMUTABLE_CHANGED", f"Cambio no autorizado en {key}"))
                 if p["level"] < highest:
@@ -160,6 +172,40 @@ class AntiCheat:
                 [(report_id, room, role, uid, code, details, now) for uid, code, details in flags])
         return {"report_id": report_id, "checked": len(validated), "alerts": [
             {"uid": uid, "code": code, "details": details} for uid, code, details in flags]}
+
+    def authorize_evolution(self, room, uid, species, ability=None):
+        """Solo administrador: registra y aprueba una evolucion ya verificada.
+
+        No determina si la especie es evolucion legal: se requiere comprobarlo
+        independientemente contra el randomizador y reglas del torneo.
+        """
+        _check_room_role(room)
+        if not isinstance(uid, str) or not ID_RE.fullmatch(uid):
+            raise ValidationError("uid invalido")
+        species = _text(species, "species")
+        if ability is not None:
+            ability = _text(ability, "ability")
+        with self.db:
+            previous = self.db.execute(
+                "SELECT baseline,dead_seen FROM pokemon WHERE room=? AND uid=?",
+                (room, uid)).fetchone()
+            if previous is None:
+                raise ValidationError("Pokemon no inscrito")
+            if previous[1]:
+                raise ValidationError("No se puede evolucionar un Pokemon muerto")
+            old = json.loads(previous[0])
+            next_ability = ability if ability is not None else old["ability"]
+            if species == old["species"] and next_ability == old["ability"]:
+                raise ValidationError("No hay cambio de evolucion")
+            new = dict(old, species=species, ability=next_ability)
+            self.db.execute("UPDATE pokemon SET baseline=? WHERE room=? AND uid=?",
+                            (json.dumps(new, sort_keys=True), room, uid))
+            self.db.execute(
+                "INSERT INTO evolutions(room,uid,old_species,new_species,old_ability,new_ability,created) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (room, uid, old["species"], species, old["ability"], next_ability, time.time()))
+        return {"room": room, "uid": uid, "old_species": old["species"],
+                "new_species": species, "ability": next_ability, "approved": True}
 
     def grant_gym_win(self, room, gym_id):
         """Solo administrador: confirmar una victoria permite UNA resurreccion."""
