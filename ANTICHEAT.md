@@ -10,6 +10,9 @@ Esta rama incluye un prototipo de auditoría, no un anti-cheat completo ni un se
 - Un gimnasio confirmado por el administrador concede un crédito de resurrección. Repetir el mismo gimnasio no permite farmear créditos.
 - Consulta de alertas con token de administrador.
 - Validación de campos y límites de las peticiones.
+- Evoluciones registradas y autorizadas manualmente: sin autorización, los cambios de especie son advertencias de revisión, no prueba automática de trampas.
+- Almacenamiento de instantáneas de cada Pokémon declarado en cada informe (datos no confiables, útiles para comparar retrospectivamente).
+- Tiempo máximo de lectura HTTP de 5 segundos y escucha solo en localhost (obligatorio proxy HTTPS para acceso remoto).
 
 El motor del juego todavía no envía observaciones automáticamente. Un cliente modificado puede falsificar u omitir observaciones. La auditoría no bloquea cambios ni constituye prueba concluyente de trampa.
 
@@ -42,6 +45,7 @@ Autenticación en cabecera Authorization: Bearer TOKEN; tipo Content-Type: appli
 | POST | /anticheat/observe | Token de rol | Enviar lista de Pokémon observados |
 | POST | /anticheat/gym | Admin | Registrar gimnasio y crédito |
 | POST | /anticheat/revive | Admin | Consumir crédito y autorizar resurrección |
+| POST | /anticheat/evolution | Admin | Aprobar nueva especie y, opcionalmente, habilidad |
 | GET | /anticheat/alerts?room=PRUEBA01 | Admin | Consultar incidencias |
 
 Ejemplo para enroll:
@@ -65,7 +69,13 @@ Ejemplo para enroll:
 
 Observe utiliza la misma estructura, pero pokemon contiene una lista. Gym recibe room y gym_id; revive recibe room y uid.
 
-El UID debe ser estable y provenir de una captura verificada. Nunca inscribir automáticamente un Pokémon a partir de una petición de cliente. En esta fase el organizador valida manualmente inscripciones y gimnasios.
+El UID debe ser estable y provenir de una captura verificada. Nunca inscribir automáticamente un Pokémon a partir de una petición de cliente. En esta fase el organizador valida manualmente inscripciones, evoluciones y gimnasios. Evolution recibe room, uid, species y opcionalmente ability. La API comprueba que cambie la especie, pero no conoce todavía el árbol de evolución del randomizador. Un administrador debe verificarlo.
+
+**Limitación EV:** se validan rangos y total, pero todavía no se autoriza ni detecta de forma fiable la modificación de EV dentro de esos rangos. Los EV pueden cambiar de forma legítima en el juego, así que para distinguir un hack de un entrenamiento hacen falta eventos de combate/objetos autorizados por el servidor.
+
+**Limitación de informes incompletos:** un jugador puede omitir Pokémon de un informe sin que se detecte automáticamente. Hay que integrar informes completos de equipo y cajas, y verificar su frecuencia. Incluso entonces, un cliente modificado podría mentir hasta tener autoridad de servidor.
+
+**Retención:** las tablas de informes, instantáneas y alertas crecen con el tiempo; antes del torneo debe definirse rotación, archivo histórico y copias de seguridad.
 
 ## Pruebas
 
@@ -73,7 +83,7 @@ El UID debe ser estable y provenir de una captura verificada. Nunca inscribir au
 python -m unittest discover -s tests -v
 ~~~
 
-Los tests cubren cambios de IV/habilidad, roles, Pokémon desconocidos, regresiones de nivel, resurrecciones, repetición de gimnasios, persistencia y flujo HTTP autenticado.
+Los tests cubren cambios de IV/habilidad, roles, Pokémon desconocidos, regresiones de nivel, resurrecciones, evoluciones verificadas, repetición de gimnasios, persistencia, instantáneas y flujo HTTP autenticado, incluidos cuerpos de petición incompletos.
 
 ## Pendiente antes del torneo
 
