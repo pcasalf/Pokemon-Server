@@ -62,6 +62,8 @@ class AntiCheatTests(unittest.TestCase):
         self.assertEqual(self.store.observe(ROOM, "player", [pokemon(species="Ivysaur")])["alerts"], [])
         self.assertEqual(self.store.db.execute("SELECT COUNT(*) FROM evolutions").fetchone()[0], 1)
         with self.assertRaises(ValidationError):
+            self.store.authorize_evolution(ROOM, "p001", "Ivysaur", ability="Illegal")
+        with self.assertRaises(ValidationError):
             self.store.authorize_evolution(ROOM, "p001", "Ivysaur")
         self.store.observe(ROOM, "player", [pokemon(species="Ivysaur", dead=True)])
         with self.assertRaises(ValidationError):
@@ -99,6 +101,17 @@ class AntiCheatTests(unittest.TestCase):
             self.store.observe(ROOM, "player", [pokemon(ivs={k: 32 for k in STATS})])
         with self.assertRaises(ValidationError):
             self.store.observe(ROOM, "player", [pokemon(evs={k: 100 for k in STATS})])
+
+    def test_observation_history_keeps_original_and_modified_snapshots(self):
+        self.store.enroll(ROOM, "player", pokemon())
+        first = self.store.observe(ROOM, "player", [pokemon()])
+        second = self.store.observe(ROOM, "player", [pokemon(ability="Illegal")])
+        rows = self.store.db.execute(
+            "SELECT report_id, snapshot FROM observations ORDER BY report_id").fetchall()
+        self.assertEqual([x[0] for x in rows], [first["report_id"], second["report_id"]])
+        self.assertEqual(json.loads(rows[0][1])["ability"], "Levitate")
+        self.assertEqual(json.loads(rows[1][1])["ability"], "Illegal")
+        self.assertEqual(second["alerts"][0]["code"], "IMMUTABLE_CHANGED")
 
     def test_persistence_and_room_isolation(self):
         self.store.enroll(ROOM, "player", pokemon())
