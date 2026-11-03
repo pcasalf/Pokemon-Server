@@ -195,8 +195,8 @@ class AntiCheat:
                 raise ValidationError("No se puede evolucionar un Pokemon muerto")
             old = json.loads(previous[0])
             next_ability = ability if ability is not None else old["ability"]
-            if species == old["species"] and next_ability == old["ability"]:
-                raise ValidationError("No hay cambio de evolucion")
+            if species == old["species"]:
+                raise ValidationError("Una evolucion debe cambiar de especie")
             new = dict(old, species=species, ability=next_ability)
             self.db.execute("UPDATE pokemon SET baseline=? WHERE room=? AND uid=?",
                             (json.dumps(new, sort_keys=True), room, uid))
