@@ -67,7 +67,7 @@ class AntiCheat:
     def __init__(self, path):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(path), timeout=10)
+        self.db = sqlite3.connect(str(path), timeout=10, check_same_thread=False)
         self.db.execute("PRAGMA busy_timeout = 10000")
         self.db.execute("PRAGMA journal_mode = WAL")
         self.db.execute("PRAGMA foreign_keys = ON")
