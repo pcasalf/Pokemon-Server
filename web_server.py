@@ -9,25 +9,17 @@ from websockets.asyncio.server import serve
 
 from server import RelayServer, validate_rooms
 from web_transport import CHUNK, forward
-from anticheat import AntiCheat
-from anticheat_web import dispatch_anticheat
 
 
 class WebRelay:
-    def __init__(self, rooms, audit, max_clients=64, anticheat_db=None, admin_token=None):
+    def __init__(self, rooms, audit, max_clients=64):
         self.relay = RelayServer(rooms, audit, max_clients=max_clients)
         self.ws_server = None
         self.port = None
         self.tcp_port = None
         self.active = 0
-        self.anticheat = AntiCheat(anticheat_db) if anticheat_db else None
-        self.admin_token = admin_token
 
     async def request(self, connection, request):
-        anticheat_response = dispatch_anticheat(
-            connection, request, self.relay.rooms, self.anticheat, self.admin_token)
-        if anticheat_response is not None:
-            return anticheat_response
         if request.path == '/health':
             return connection.respond(HTTPStatus.OK, 'ok\n' if self.relay.rooms else 'setup_required\n')
         if request.path != '/relay':
@@ -69,8 +61,6 @@ class WebRelay:
             self.ws_server.close()
             await self.ws_server.wait_closed()
         await self.relay.close()
-        if self.anticheat:
-            self.anticheat.close()
 
 
 async def main():
@@ -83,12 +73,7 @@ async def main():
             raise SystemExit('PZ_ROOMS_JSON no tiene un formato de salas valido.') from None
     else:
         print('Pendiente configurar PZ_ROOMS_JSON: conexiones de juego deshabilitadas.', flush=True)
-    anticheat_db = os.environ.get('PZ_ANTICHEAT_DB')
-    admin_token = os.environ.get('PZ_ADMIN_TOKEN')
-    if anticheat_db and (not admin_token or len(admin_token) < 32):
-        raise SystemExit('PZ_ADMIN_TOKEN debe contener al menos 32 caracteres si se activa la auditoria.')
-    relay = WebRelay(rooms, os.environ.get('PZ_AUDIT_PATH', 'data/audit.jsonl'),
-                     anticheat_db=anticheat_db, admin_token=admin_token)
+    relay = WebRelay(rooms, os.environ.get('PZ_AUDIT_PATH', 'data/audit.jsonl'))
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
