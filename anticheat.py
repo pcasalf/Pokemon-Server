@@ -84,6 +84,11 @@ class AntiCheat:
                     role TEXT NOT NULL, created REAL NOT NULL,
                     count INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS observations (
+                    report_id INTEGER NOT NULL REFERENCES reports(id),
+                    uid TEXT NOT NULL, snapshot TEXT NOT NULL,
+                    PRIMARY KEY (report_id, uid)
+                );
                 CREATE TABLE IF NOT EXISTS alerts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     report_id INTEGER NOT NULL REFERENCES reports(id),
@@ -140,6 +145,11 @@ class AntiCheat:
             cur = self.db.execute("INSERT INTO reports(room,role,created,count) VALUES(?,?,?,?)",
                                   (room, role, now, len(validated)))
             report_id = cur.lastrowid
+            # Conservar el estado recibido para auditoria retrospectiva.
+            # Es una declaracion del cliente, no una prueba independiente.
+            self.db.executemany(
+                "INSERT INTO observations(report_id,uid,snapshot) VALUES(?,?,?)",
+                [(report_id, p["uid"], json.dumps(p, sort_keys=True)) for p in validated])
             for p in validated:
                 previous = self.db.execute(
                     "SELECT role,baseline,highest_level,dead_seen FROM pokemon WHERE room=? AND uid=?",
