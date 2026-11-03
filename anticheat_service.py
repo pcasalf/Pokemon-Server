@@ -7,6 +7,7 @@ import json
 import os
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socket import timeout as SocketTimeout
 from types import SimpleNamespace
 
 from anticheat import AntiCheat
@@ -15,6 +16,13 @@ from server import validate_rooms
 
 
 class AuditHandler(BaseHTTPRequestHandler):
+    READ_TIMEOUT = 5
+
+    def setup(self):
+        super().setup()
+        # Una peticion incompleta no debe secuestrar indefinidamente la API.
+        self.connection.settimeout(self.READ_TIMEOUT)
+
     def do_GET(self):
         self._dispatch()
 
@@ -32,7 +40,12 @@ class AuditHandler(BaseHTTPRequestHandler):
                 self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
                 self.close_connection = True
                 return
-            raw = self.rfile.read(size)
+            try:
+                raw = self.rfile.read(size)
+            except (SocketTimeout, TimeoutError):
+                self.send_error(HTTPStatus.REQUEST_TIMEOUT)
+                self.close_connection = True
+                return
             if len(raw) != size:
                 self.send_error(HTTPStatus.BAD_REQUEST)
                 return
@@ -74,7 +87,7 @@ def main():
     host = os.environ.get("PZ_ANTICHEAT_HOST", "127.0.0.1")
     port = int(os.environ.get("PZ_ANTICHEAT_PORT", "27018"))
     if host not in ("127.0.0.1", "localhost", "::1"):
-        print("AVISO: HTTP sin TLS. Publicar solo detras de un proxy HTTPS seguro.", flush=True)
+        raise SystemExit("Por seguridad, API HTTP sin TLS solo admite localhost. Usa un proxy HTTPS.")
     store = AntiCheat(db_path)
     try:
         with AuditHTTPServer((host, port), rooms, store, admin_token) as server:
